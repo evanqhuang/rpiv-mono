@@ -297,6 +297,28 @@ describe("rpiv-todo — foreground overlay policy (Slice 2)", () => {
 		expect(getState(PARENT).tasks).toEqual([]);
 	});
 
+	it("a delayed TUI session_start cannot reclaim a foreground after its shutdown", async () => {
+		const { start, shutdown } = setup();
+		const originalCtx = createMockCtx({ hasUI: true, sessionId: "original", mode: "tui" });
+
+		await start?.({}, originalCtx as never);
+		await shutdown?.({}, originalCtx as never);
+		await start?.({}, originalCtx as never);
+
+		expect(getActiveRenderSession()).toBe("");
+	});
+
+	it("rebinds the same SessionManager during an intentional reload", async () => {
+		const { start, shutdown } = setup();
+		const ctx = createMockCtx({ hasUI: true, sessionId: "reloadable", mode: "tui" });
+
+		await start?.({ reason: "startup" }, ctx as never);
+		await shutdown?.({ reason: "reload" }, ctx as never);
+		await start?.({ reason: "reload" }, ctx as never);
+
+		expect(getActiveRenderSession()).toBe("reloadable");
+	});
+
 	it("foreground shutdown still clears the pointer + evicts the slot when dispose() throws (try/finally)", async () => {
 		const { start, shutdown, toolEnd, tool } = setup();
 		const parentCtx = createMockCtx({ hasUI: true, sessionId: PARENT });
@@ -356,6 +378,29 @@ describe("rpiv-todo — foreground overlay policy (Slice 2)", () => {
 			replacementCtx as never,
 		);
 		await toolEnd?.({ toolName: "todo", isError: false }, replacementCtx as never);
+
+		expect(getActiveRenderSession()).toBe("replacement");
+		expect(getRenderState().tasks.map((task) => task.subject)).toEqual(["replacement task"]);
+	});
+
+	it("a delayed old TUI session_start cannot reclaim the foreground after replacement", async () => {
+		const { start, tool } = setup();
+		const originalCtx = createMockCtx({ hasUI: true, sessionId: "original", mode: "tui" });
+		const replacementCtx = createMockCtx({ hasUI: true, sessionId: "replacement", mode: "tui" });
+
+		await start?.({}, originalCtx as never);
+		await start?.({}, replacementCtx as never);
+		await tool?.execute?.(
+			"tc",
+			{ action: "create", subject: "replacement task" } as never,
+			undefined as never,
+			undefined as never,
+			replacementCtx as never,
+		);
+
+		// A late event from the old runtime must not move ctx-less rendering back
+		// to the old session's slot.
+		await start?.({}, originalCtx as never);
 
 		expect(getActiveRenderSession()).toBe("replacement");
 		expect(getRenderState().tasks.map((task) => task.subject)).toEqual(["replacement task"]);
